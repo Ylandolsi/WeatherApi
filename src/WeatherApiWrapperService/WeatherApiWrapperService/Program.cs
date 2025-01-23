@@ -5,10 +5,16 @@ using WeatherApiWrapperService.Services;
 
 
 var builder = WebApplication.CreateBuilder(args);
+// Distributed Caching Redis 
+builder.ConfigureRedis();
+
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.ConfigureCors();
+
+
+
 
 builder.Services.ConfigureSwagger();
 builder.Services.AddProblemDetails(); 

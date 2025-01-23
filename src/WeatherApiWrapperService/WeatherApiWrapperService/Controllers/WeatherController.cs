@@ -41,4 +41,22 @@ public class WeatherController : ControllerBase
 
         return Ok(result);
     }
+    
+    [HttpDelete]
+    public async Task<IActionResult> DeleteAllCaches()
+    {
+        await _weatherService.DeleteAllCaches();
+        return Ok();
+    }
+    // Clears a specific cache entry based on its key.
+    [HttpDelete("{key}")]
+    public async Task<IActionResult> ClearCacheByKey(string key)
+    {
+        if ( key is null )
+        {
+            return BadRequest("Key is required.");
+        }
+        await _weatherService.DeleteCache(key);
+        return Ok();
+    }
 }
