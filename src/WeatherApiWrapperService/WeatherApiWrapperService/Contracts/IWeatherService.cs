@@ -2,5 +2,9 @@ namespace WeatherApiWrapperService.Contracts;
 
 public interface IWeatherService
 {
-    void test();  
+    Task<string?> GetWeatherAsync(string city, string country);
+
+    Task<string?> GetWeatherByLocationAsync(double latitude, double longitude); 
+
+
 }
