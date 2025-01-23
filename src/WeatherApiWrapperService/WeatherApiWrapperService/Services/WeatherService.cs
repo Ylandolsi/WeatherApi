@@ -14,18 +14,19 @@ public class WeatherService : IWeatherService
     private readonly string _baseUrl;
     private readonly ILogger<WeatherService> _logger;
 
-    // Dependency for interacting with Redis via IDistributedCache
-    private readonly IDistributedCache _distributedCache;
+    // // // Dependency for interacting with Redis via IDistributedCache
+    // private readonly IDistributedCache _distributedCache;
 
     // Dependency for interacting directly with Redis using StackExchange.Redis
     private readonly IConnectionMultiplexer _redisConnection;
 
     private readonly IConfiguration _configuration;
 
+    private readonly IDatabase _databaseCache;
+
 
     public WeatherService(HttpClient httpClient,
         ILogger<WeatherService> logger,
-        IDistributedCache distributedCache,
         IConnectionMultiplexer redisConnection,
         IConfiguration configuration)
     {
@@ -33,21 +34,36 @@ public class WeatherService : IWeatherService
         _apiKey = configuration.GetSection("WeatherApi:ApiKey").Value;
         _baseUrl = configuration.GetSection("WeatherApi:BaseUrl").Value;
         _logger = logger;
-        _distributedCache = distributedCache;
         _redisConnection = redisConnection;
         _configuration = configuration;
+        _databaseCache = redisConnection.GetDatabase();
+
+
+        // _distributedCache = distributedCache;
     }
 
     public async Task<string?> GetWeatherAsync(string city, string country)
     {
         var cacheKey = $"{city}-{country}";
-        var cacheValue = await _distributedCache.GetStringAsync(cacheKey);
-        if ( cacheValue != null)
+        var cacheValue = await _databaseCache.StringGetAsync(cacheKey);
+
+
+        if (cacheValue.HasValue)
         {
+            var slidingExpiration = TimeSpan.FromMinutes(1);
             _logger.LogInformation($"Cache hit for {city}-{country}");
-            var cacheDataJson = JsonSerializer.Deserialize<string>(cacheValue);
-            return cacheDataJson;
+
+            var remainingTime = await _databaseCache.KeyTimeToLiveAsync(cacheKey);
+
+
+            if (slidingExpiration > remainingTime)
+            {
+                await _databaseCache.KeyExpireAsync(cacheKey, slidingExpiration);
+            }
+
+            return cacheValue;
         }
+
         DateTime now = DateTime.Now;
         string formattedDate = now.ToString("yyyy-MM-dd");
         _logger.LogInformation($"Http Get request for weather in {city} ,{country} at {formattedDate}");
@@ -64,29 +80,37 @@ public class WeatherService : IWeatherService
 
         // response.EnsureSuccessStatusCode();
         var content = await response.Content.ReadAsStringAsync();
-        
-        
-        // cache 
-        var serializedData = JsonSerializer.Serialize(content);
-        var cacheOptions = new DistributedCacheEntryOptions
-        {
-            SlidingExpiration = TimeSpan.FromMinutes(10)
-        };
 
-        await _distributedCache.SetStringAsync(cacheKey, serializedData,cacheOptions);        
+
+        // cache 
+        await _databaseCache.StringSetAsync(cacheKey, content, TimeSpan.FromMinutes(1));
+
+
         return content;
     }
 
     public async Task<string?> GetWeatherByLocationAsync(double latitude, double longitude)
     {
         var cacheKey = $"{latitude}-{longitude}";
-        var cacheValue = await _distributedCache.GetStringAsync(cacheKey);
-        if ( cacheValue != null)
+        var cacheValue = await _databaseCache.StringGetAsync(cacheKey);
+
+
+        if (cacheValue.HasValue)
         {
+            var slidingExpiration = TimeSpan.FromMinutes(1);
             _logger.LogInformation($"Cache hit for {latitude}-{longitude}");
-            var cacheData = JsonSerializer.Deserialize<string>(cacheValue);
+
+            var remainingTime = await _databaseCache.KeyTimeToLiveAsync(cacheKey);
+
+
+            if (slidingExpiration > remainingTime)
+            {
+                await _databaseCache.KeyExpireAsync(cacheKey, slidingExpiration);
+            }
+
             return cacheValue;
         }
+        
         DateTime now = DateTime.Now;
         string formattedDate = now.ToString("yyyy-MM-dd");
         _logger.LogInformation(
@@ -101,20 +125,17 @@ public class WeatherService : IWeatherService
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        // response.EnsureSuccessStatusCode();
         var content = await response.Content.ReadAsStringAsync();
-        // cache 
-        var serializedData = JsonSerializer.Serialize(content);
-        var cacheOptions = new DistributedCacheEntryOptions
-        {
-            // AbsoluteExpiration = DateTimeOffset.Now.AddMinutes(10) 
-             // SlidingExpiration= TimeSpan.FromMinutes(10)
-            //
-        };
 
-        await _distributedCache.SetStringAsync(cacheKey, content,cacheOptions);   
+
+        // cache 
+        await _databaseCache.StringSetAsync(cacheKey, content, TimeSpan.FromMinutes(1));
+
+
         return content;
     }
+
     public Task DeleteAllCaches()
     {
         // Get the Redis server instance from the connection multiplexer
@@ -130,24 +151,28 @@ public class WeatherService : IWeatherService
             var keyWithoutPrefix = key.ToString().Replace($"{instanceName}", "");
 
             // Remove each key-value pair from the distributed cache
-            _distributedCache.Remove(keyWithoutPrefix);
+            // _distributedCache.Remove(keyWithoutPrefix);
+            _databaseCache.KeyDelete(keyWithoutPrefix);
         }
-        return Task.CompletedTask;
 
+        return Task.CompletedTask;
     }
-    public async Task  DeleteCache(string key)
+
+    public async Task DeleteCache(string key)
     {
-        var cacheValue = await _distributedCache.GetStringAsync(key);
-        if (cacheValue is null )
+        // var cacheValue = await _distributedCache.GetStringAsync(key);
+        var cacheValue = (await _databaseCache.StringGetAsync(key)).ToString();
+
+        if (cacheValue is null)
         {
             _logger.LogInformation($"Deletion failed : Cache key {key} not found");
-            
+
             return;
         }
+
         // Remove the specified key-value pair from the distributed cache
-        _distributedCache.Remove(key);
+        // _distributedCache.Remove(key);
+        _databaseCache.KeyDelete(key);
         _logger.LogInformation($"Cache key {key} deleted");
-
-
     }
 }
